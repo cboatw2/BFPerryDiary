@@ -27,3 +27,4 @@ env.bak/
 venv.bak/
 
 # Add API key
+.env
