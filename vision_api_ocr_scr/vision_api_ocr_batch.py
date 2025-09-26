@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 import base64
 from openai import OpenAI
+import glob
 
 """
 Load API key
@@ -31,13 +32,7 @@ load_dotenv()
 
 def encode_image(image_path):
     """
-    Encode image to base64 for OpenAI Vision API.
-    
-    Args:
-        image_path (str): Path to the image file
-        
-    Returns:
-        str: Base64 encoded image
+    Converts images to base64 for OpenAI Vision API.
     """
     try:
         with open(image_path, "rb") as image_file:
@@ -66,39 +61,35 @@ def transcribe_with_vision_api(image_path, api_key):
         base64_image = encode_image(image_path)
         if not base64_image:
             return None, None
-        
-        # Determine image format
-        image_format = Path(image_path).suffix.lower()
-        if image_format not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-            print(f"Warning: {image_format} may not be supported by Vision API")
-        
+
+        # Get image format (e.g., 'jpg')
+        image_format = Path(image_path).suffix.lower()  # '.jpg'
+        if image_format.startswith('.'):
+            image_format = image_format[1:]  # 'jpg'
+
         # Send request to OpenAI Vision API
         response = client.chat.completions.create(
-            model="gpt-4o",  # Using GPT-4o for vision capabilities
+            model="gpt-4o",
             messages=[
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": """Please transcribe all the text visible in this image. The text may be in any language including English, Spanish, French, German, Chinese, Japanese, Korean, Arabic, Hindi, Tamil, or other languages.
-                            
-                            Instructions:
-                            1. Extract ALL text from the image, preserving the original layout and structure
-                            2. Maintain line breaks and paragraph structure
-                            3. Do not add any commentary or interpretation
-                            4. If text is unclear or partially obscured, transcribe what you can see
-                            5. Preserve original spelling and formatting in the original language
-                            6. Include headers, titles, dates, and all visible text elements
-                            7. If the text is in a non-Latin script (like Arabic, Chinese, Tamil, etc.), transcribe it exactly as written
-                            8. Do not translate the text - only transcribe it
-                            
-                            Return only the transcribed text in its original language."""
+                            "text": """Please transcribe all the text visible in this image. The text is written in 19th-century American cursive English, and may include old-fashioned spelling, grammar, and punctuation.
+
+                                Instructions:
+                                1. Carefully extract ALL text from the image, preserving the original layout and structure.
+                                2. Maintain line breaks and paragraph structure as closely as possible.
+                                3. Do not modernize, interpret, or correct the spelling, grammar, or punctuation.
+                                4. If a word is unclear or partially obscured, transcribe what you can see; if completely unreadable, use [illegible].
+                                5. Preserve original spelling, capitalization, and formatting.
+                                6. Return only the transcribed text, with no commentary or interpretation."""
                         },
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/{image_format[1:]};base64,{base64_image}"
+                                "url": f"data:image/{image_format};base64,{base64_image}"
                             }
                         }
                     ]
@@ -184,14 +175,10 @@ def print_usage_summary(usage_info, cost_info):
     print("=" * 50)
 
 
-def save_transcription(text, image_path, output_dir="vision_results"):
+def save_transcription(text, image_path, output_dir="vision_api_ocr_output"):
     """
-    Save transcribed text to a file.
-    
-    Args:
-        text (str): Transcribed text to save
-        image_path (str): Path to original image
-        output_dir (str): Directory to save results
+    Save transcribed text to a file in vision_api_ocr_output directory,
+    appending _vision_api_ocr_batch to the original filename.
     """
     # Create output directory if it doesn't exist
     Path(output_dir).mkdir(exist_ok=True)
@@ -199,8 +186,8 @@ def save_transcription(text, image_path, output_dir="vision_results"):
     # Get base filename without extension
     base_name = Path(image_path).stem
     
-    # Save transcribed text
-    output_file = Path(output_dir) / f"{base_name}_vision_transcription.txt"
+    # Save transcribed text with new naming convention
+    output_file = Path(output_dir) / f"{base_name}_vision_api_ocr_batch.txt"
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(text)
     
@@ -208,54 +195,52 @@ def save_transcription(text, image_path, output_dir="vision_results"):
 
 
 def main():
-    """Main function to run the Vision API OCR workflow."""
+    """Main function to run the Vision API OCR workflow on all images in a folder."""
     parser = argparse.ArgumentParser(description="OCR using OpenAI Vision API")
-    parser.add_argument("image_path", help="Path to the image file to process")
+    parser.add_argument(
+        "--images-dir",
+        default="/Users/crboatwright/BFPerryDiary/images",
+        help="Directory containing images to process (default: ./images)"
+    )
     parser.add_argument("--api-key", help="OpenAI API key (or set OPENAI_API_KEY environment variable)")
     parser.add_argument("--output-dir", default="vision_results", help="Directory to save results (default: vision_results)")
-    
     args = parser.parse_args()
-    
-    # Check if image file exists
-    if not os.path.exists(args.image_path):
-        print(f"Error: Image file '{args.image_path}' not found.")
-        sys.exit(1)
-    
+
     # Get API key
     api_key = args.api_key or os.getenv('OPENAI_API_KEY')
     if not api_key:
         print("Error: OpenAI API key required.")
         print("Set OPENAI_API_KEY environment variable or use --api-key option.")
         sys.exit(1)
-    
-    print(f"Processing image: {args.image_path}")
-    print("=" * 50)
-    
-    # Transcribe with Vision API
-    print("Step 1: Sending image to OpenAI Vision API...")
-    transcribed_text, usage_info = transcribe_with_vision_api(args.image_path, api_key)
-    
-    if not transcribed_text:
-        print("Error: Vision API transcription failed.")
+
+    # Gather image files. Only process .jpg files for this project.
+    image_files = glob.glob(os.path.join(args.images_dir, '*.jpg'))
+    if not image_files:
+        print(f"No .jpg image files found in '{args.images_dir}'.")
         sys.exit(1)
-    
-    print("Vision API transcription completed.")
-    print(f"Transcribed {len(transcribed_text)} characters.")
-    print("\nTranscribed text:")
-    print("-" * 30)
-    print(transcribed_text)
-    print("-" * 30)
-    
-    # Calculate and display usage/cost
-    if usage_info:
-        cost_info = calculate_cost(usage_info, "gpt-4o")
-        print_usage_summary(usage_info, cost_info)
-    
-    # Save results
-    print("\nStep 2: Saving results...")
-    save_transcription(transcribed_text, args.image_path, args.output_dir)
-    
-    print("\nProcess completed successfully!")
+
+    print(f"Found {len(image_files)} .jpg images in '{args.images_dir}'.")
+    print("=" * 50)
+
+    for idx, image_path in enumerate(image_files, 1):
+        print(f"\n[{idx}/{len(image_files)}] Processing image: {image_path}")
+        print("-" * 50)
+
+        transcribed_text, usage_info = transcribe_with_vision_api(image_path, api_key)
+
+        if not transcribed_text:
+            print("Error: Vision API transcription failed for this image.")
+            continue
+
+        print(f"Vision API transcription completed. Transcribed {len(transcribed_text)} characters.")
+
+        if usage_info:
+            cost_info = calculate_cost(usage_info, "gpt-4o")
+            print_usage_summary(usage_info, cost_info)
+
+        save_transcription(transcribed_text, image_path, args.output_dir)
+
+    print("\nBatch processing completed successfully!")
 
 
 if __name__ == "__main__":
