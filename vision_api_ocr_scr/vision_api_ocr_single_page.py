@@ -61,14 +61,19 @@ def transcribe_with_vision_api(image_path, api_key):
 
         # Send request to OpenAI Vision API
         response = client.chat.completions.create(
-            model="gpt-4-turbo",  # <-- Switched model here
+            model="gpt-4o",  # <-- Switched model here
             messages=[
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": """Please transcribe all visible text from this image of a 19th-century American handwritten diary. Preserve original spelling, punctuation, and formatting. If a word is unreadable, use [illegible]. Return only the transcribed text."""
+                            "text": (
+    "Please transcribe all visible text from this image. "
+    "Preserve spelling, punctuation, and formatting. "
+    "Maintain all original line breaks and paragraph structure as closely as possible. "
+    "If a word is unreadable, use [illegible]. Return only the transcribed text."
+)
                         },
                         {
                             "type": "image_url",
@@ -163,18 +168,37 @@ def print_usage_summary(usage_info, cost_info):
 def save_transcription(text, image_path, output_dir="vision_results"):
     """
     Save transcribed text to a file in vision_results directory,
-    appending _vision_api_ocr_single_page to the original filename.
+    appending _vision_api_ocr_single_page and a unique number if needed.
+    Cleans up common model intro and horizontal rules.
     """
+    # Clean unwanted intro and horizontal rules
+    lines = text.splitlines()
+    cleaned_lines = []
+    for line in lines:
+        # Remove intro line and horizontal rules
+        if line.strip().lower().startswith("sure, here is the transcribed text"):
+            continue
+        if line.strip() == "---":
+            continue
+        cleaned_lines.append(line)
+    cleaned_text = "\n".join(cleaned_lines).strip()
+
     # Create output directory if it doesn't exist
     Path(output_dir).mkdir(exist_ok=True)
     
     # Get base filename without extension
     base_name = Path(image_path).stem
+    base_output = f"{base_name}_vision_api_ocr_single_page"
+    output_file = Path(output_dir) / f"{base_output}.txt"
     
-    # Save transcribed text with new naming convention
-    output_file = Path(output_dir) / f"{base_name}_vision_api_ocr_single_page.txt"
+    # If file exists, append _1, _2, etc.
+    count = 1
+    while output_file.exists():
+        output_file = Path(output_dir) / f"{base_output}_{count}.txt"
+        count += 1
+
     with open(output_file, 'w', encoding='utf-8') as f:
-        f.write(text)
+        f.write(cleaned_text)
     
     print(f"Vision API transcription saved to: {output_file}")
 
